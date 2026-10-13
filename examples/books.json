@@ -1,0 +1,22 @@
+{
+  "books": [
+    {
+      "bookName": "长夜将明",
+      "genre": "novel",
+      "channel": "male",
+      "idea": "昆仑坊市杂役陈默捡到残破玉简，装弱打脸、凡人逆袭。",
+      "targetChapters": 3,
+      "chapterChars": 800
+    },
+    {
+      "bookName": "她从烬里来",
+      "genre": "novel",
+      "channel": "female",
+      "idea": "重生后的宗门弃徒，这一次先把师尊的棋盘掀了。",
+      "targetChapters": 3,
+      "chapterChars": 800,
+      "styleId": "",
+      "templateId": "novel-golden-three"
+    }
+  ]
+}

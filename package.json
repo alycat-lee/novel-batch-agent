@@ -1,0 +1,24 @@
+{
+  "name": "novel-batch-agent",
+  "version": "0.1.0",
+  "description": "批量小说写作 Agent：复刻 dsh-writer-m 分步写作，独立宿主 + 多本队列。",
+  "license": "MIT",
+  "type": "module",
+  "main": "server/main.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server/main.js",
+    "batch": "node scripts/batch-cli.mjs",
+    "build:client": "node scripts/build-client.mjs",
+    "check": "node scripts/check-host.mjs && node scripts/check-client.mjs && node scripts/check-vaultlib.mjs && node scripts/check-standalone.mjs"
+  },
+  "keywords": [
+    "novel",
+    "writing",
+    "agent",
+    "batch",
+    "deepseek"
+  ]
+}

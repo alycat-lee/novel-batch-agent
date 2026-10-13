@@ -1,0 +1,18 @@
+# 依赖
+node_modules/
+
+# 密钥与本地配置（apiKey 在数据根目录的 .agent-config.json 里）
+.agent-config.json
+.env
+*.log
+
+# 作品落盘（若把 WRITER_ROOT 指到仓库内）
+.batch/
+.dsh-writer-m/
+data/
+
+# 系统垃圾
+.DS_Store
+Thumbs.db
+__pycache__/
+*.pyc
