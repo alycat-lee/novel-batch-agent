@@ -263,6 +263,7 @@
               ['create', '创建作品'],
               ['template', '模版'],
               ['style', '风格'],
+              ['vaultlib', '书库'],
               ['settings', '设置'],
             ].map(([id, label]) =>
               h(
@@ -325,6 +326,7 @@
           !inStudio && tab === 'template' ? h(TemplateTab, { boot, setBoot, setErr, flash, detail, genreFilter }) : null,
           !inStudio && tab === 'style' ? h(StyleTab, { boot, setBoot, setErr, flash, defaultGenre: genreFilter, genreFilter }) : null,
           !inStudio && tab === 'settings' ? h(SettingsTab, { boot, setBoot, setErr, flash }) : null,
+          !inStudio && tab === 'vaultlib' ? h(VaultLibTab, { boot, setBoot, setErr, flash }) : null,
         ),
       )
     }

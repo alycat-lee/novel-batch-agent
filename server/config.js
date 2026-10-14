@@ -21,6 +21,9 @@ export const DEFAULTS = {
   baseURL: 'https://api.deepseek.com',
   maxTokens: 3000,
   vaultPath: '',
+  vaultSourceDir: 'dsh-writer-m/爆款原文',
+  vaultAssetsDir: 'dsh-writer-m/拆书资产',
+  vaultWorksDir: 'dsh-writer-m/作品',
   publishPython: '',
   publishScript: '',
   publishProfile: '',
@@ -73,6 +76,9 @@ export function normalize(raw) {
     baseURL: String(src.baseURL ?? DEFAULTS.baseURL).trim() || DEFAULTS.baseURL,
     maxTokens: Number.isInteger(src.maxTokens) && src.maxTokens > 0 ? src.maxTokens : DEFAULTS.maxTokens,
     vaultPath: String(src.vaultPath ?? '').trim(),
+    vaultSourceDir: String(src.vaultSourceDir ?? DEFAULTS.vaultSourceDir).trim() || DEFAULTS.vaultSourceDir,
+    vaultAssetsDir: String(src.vaultAssetsDir ?? DEFAULTS.vaultAssetsDir).trim() || DEFAULTS.vaultAssetsDir,
+    vaultWorksDir: String(src.vaultWorksDir ?? DEFAULTS.vaultWorksDir).trim() || DEFAULTS.vaultWorksDir,
     batch: normalizeBatch(src.batch),
   }
   for (const key of ['publishPython', 'publishScript', 'publishProfile', 'publishBookName', 'publishLoginScript']) {
