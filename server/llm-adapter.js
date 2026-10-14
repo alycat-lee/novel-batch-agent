@@ -230,7 +230,7 @@ function modelsUrl(baseURL) {
 
 /**
  * 探测 OpenAI 兼容 /models：连通性 + 可用模型 id 列表。
- * overrides 可带未保存的表单值（baseURL / model），apiKey 始终读宿主配置。
+ * overrides 可带未保存的表单值（baseURL / model / apiKey）。
  */
 async function testConnection(cfg, overrides = {}) {
   if (process.env.MOCK_LLM === '1' || process.env.MOCK_LLM === 'true') {
@@ -244,9 +244,10 @@ async function testConnection(cfg, overrides = {}) {
       baseURL: normalizeBaseURL(overrides.baseURL ?? cfg.baseURL),
     }
   }
-  const apiKey = resolveEnvRef(cfg.apiKey).trim()
+  const overrideKey = String(overrides.apiKey ?? '').trim()
+  const apiKey = (overrideKey !== '' ? resolveEnvRef(overrideKey) : resolveEnvRef(cfg.apiKey)).trim()
   if (apiKey === '') {
-    throw new Error('未配置 apiKey（可在 .agent-config.json 填写或设 DEEPSEEK_API_KEY）')
+    throw new Error('未配置 apiKey（请在设置页填写，或写 .agent-config.json / 设 DEEPSEEK_API_KEY）')
   }
   const base = normalizeBaseURL(overrides.baseURL ?? cfg.baseURL)
   const url = modelsUrl(base)
@@ -267,7 +268,7 @@ async function testConnection(cfg, overrides = {}) {
   if (!res.ok) {
     let detail = ''
     try { detail = await res.text() } catch { detail = '' }
-    throw new Error('模型列表 HTTP ' + res.status + '：' + clip(detail, 400))
+    throw new Error(httpErrorMessage(res.status, detail))
   }
   let json
   try {
@@ -356,7 +357,7 @@ async function* liveStream(options, cfg) {
     try { detail = await res.text() } catch { detail = '' }
     yield {
       type: 'finish',
-      reason: { kind: 'error', failure: { message: `HTTP ${res.status} ${clip(detail, 400)}` } },
+      reason: { kind: 'error', failure: { message: httpErrorMessage(res.status, detail) } },
     }
     return
   }
@@ -416,6 +417,18 @@ async function* liveStream(options, cfg) {
 function clip(s, n) {
   const t = String(s ?? '')
   return t.length <= n ? t : t.slice(0, n)
+}
+
+/** 把上游 HTTP 错误翻成人话（402 余额不足最常见）。 */
+function httpErrorMessage(status, detail) {
+  const raw = String(detail ?? '')
+  if (status === 402 || /Insufficient Balance/i.test(raw)) {
+    return '模型账户余额不足（HTTP 402）。请到服务商控制台充值，或在设置里换成有余额的 apiKey 并点「保存模型配置」（当前配置若仍是 ${DEEPSEEK_API_KEY}，改环境变量后还需重启本服务）。原文：' + clip(raw, 240)
+  }
+  if (status === 401 || /invalid.*api.?key|authentication/i.test(raw)) {
+    return 'apiKey 无效或未授权（HTTP ' + status + '）。请在设置里重新填写并保存。原文：' + clip(raw, 240)
+  }
+  return 'HTTP ' + status + ' ' + clip(raw, 400)
 }
 
 export function createLlm(getConfig) {

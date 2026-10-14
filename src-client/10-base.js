@@ -334,9 +334,11 @@
 
     function Input(props) {
       return h('input', {
+        type: props.type || 'text',
         style: Object.assign({}, S.input, props.style || {}),
         value: props.value,
         placeholder: props.placeholder,
+        autoComplete: props.autoComplete,
         spellCheck: false,
         list: props.list,
         onKeyDown: props.onKeyDown,

@@ -78,13 +78,20 @@ export function normalize(raw) {
   for (const key of ['publishPython', 'publishScript', 'publishProfile', 'publishBookName', 'publishLoginScript']) {
     merged[key] = String(src[key] ?? DEFAULTS[key] ?? '').trim()
   }
+  // hasApiKey / apiKeySource 只给前端 state 用，不落盘
+  delete merged.hasApiKey
+  delete merged.apiKeySource
   return merged
 }
 
-/** 传给 apply() 的配置：去掉密钥，避免 /api/state 把 apiKey 回给浏览器。 */
+/** 传给 apply() 的配置：去掉密钥明文，只回 hasApiKey / apiKeySource，避免 /api/state 泄露。 */
 export function publicConfig(cfg) {
   const out = { ...cfg }
+  const raw = String(cfg.apiKey ?? '').trim()
+  const resolved = resolveEnvRef(raw).trim()
   delete out.apiKey
+  out.hasApiKey = resolved !== ''
+  out.apiKeySource = raw === '' ? 'none' : (/^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/.test(raw) ? 'env' : 'literal')
   return out
 }
 

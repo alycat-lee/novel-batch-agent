@@ -53,7 +53,7 @@ server/config.js        <root>/.agent-config.json + configEditor.edit 写盘
 | `batch.retry` | `3` | 单步失败重试次数 |
 | `batch.retryDelayMs` | `5000` | 重试起始间隔（指数退避） |
 
-工作台「设置」里改 `maxTokens` / `root` / `provider` / `model` / `baseURL` 会走 `configEditor.edit` **写盘**，重启后仍在；「测试」会请求 `{baseURL}/models` 并返显可用 model。
+工作台「设置 → 模型路由」可改 `provider` / `baseURL` / `apiKey` / `model` / `maxTokens`（写盘后重启仍在）。`apiKey` 明文不回传浏览器，只显示是否已配置；留空保存表示不改动已有密钥。「测试」会请求 `{baseURL}/models` 并返显可用 model。
 
 ```powershell
 copy .env.example .env

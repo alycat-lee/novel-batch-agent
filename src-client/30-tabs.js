@@ -676,12 +676,17 @@
       const [root, setRoot] = useState(boot.config.root)
       const [provider, setProvider] = useState(boot.config.provider)
       const [baseURL, setBaseURL] = useState(boot.config.baseURL || 'https://api.deepseek.com')
+      const [apiKey, setApiKey] = useState('')
       const [model, setModel] = useState(boot.config.model)
       const [maxTokens, setMaxTokens] = useState(String(boot.config.maxTokens || 3000))
       const [busy, setBusy] = useState(false)
       const [testing, setTesting] = useState(false)
       const [testModels, setTestModels] = useState([])
       const [testHint, setTestHint] = useState('')
+      const hasApiKey = boot.config.hasApiKey === true
+      const apiKeySource = boot.config.apiKeySource === 'env' || boot.config.apiKeySource === 'literal'
+        ? boot.config.apiKeySource
+        : (hasApiKey ? 'literal' : 'none')
       // 番茄发布/登录：登录态目录、解释器、站点书名
       const [pubProfile, setPubProfile] = useState(boot.config.publishProfile || '')
       const [pubPython, setPubPython] = useState(boot.config.publishPython || '')
@@ -693,17 +698,19 @@
       const save = async () => {
         setBusy(true)
         try {
-          const data = await api('config', {
-            patch: {
-              root: root.trim(),
-              provider: provider.trim(),
-              baseURL: baseURL.trim(),
-              model: model.trim(),
-              maxTokens: Number(maxTokens) || 3000,
-            },
-          })
+          const patch = {
+            root: root.trim(),
+            provider: provider.trim(),
+            baseURL: baseURL.trim(),
+            model: model.trim(),
+            maxTokens: Number(maxTokens) || 3000,
+          }
+          // 留空不改已有密钥；填了才写入
+          if (apiKey.trim() !== '') patch.apiKey = apiKey.trim()
+          const data = await api('config', { patch })
           if (data.warning !== '') flash(data.warning)
           else flash('配置已写入')
+          setApiKey('')
           const fresh = await api('state')
           setBoot(fresh)
         } catch (e) {
@@ -713,7 +720,7 @@
         }
       }
 
-      /** 用当前表单里的 url 拉 /models，把可用 model 填回输入框并列出可选列表。 */
+      /** 用当前表单里的 url / apiKey 拉 /models，把可用 model 填回输入框并列出可选列表。 */
       const testLlm = async () => {
         setTesting(true)
         setTestHint('')
@@ -722,6 +729,7 @@
             baseURL: baseURL.trim(),
             provider: provider.trim(),
             model: model.trim(),
+            apiKey: apiKey.trim(),
           })
           const models = Array.isArray(data.models) ? data.models : []
           setTestModels(models)
@@ -849,6 +857,10 @@
           boot.llm.route === null
             ? h(Chip, { style: { borderColor: C.err, color: C.err } }, '未配置')
             : h(Chip, null, boot.llm.route.provider + ' / ' + boot.llm.route.model),
+          hasApiKey
+            ? h(Chip, { style: { borderColor: C.ok, color: C.ok } },
+                apiKeySource === 'env' ? 'apiKey 走环境变量' : 'apiKey 已写入配置')
+            : h(Chip, { style: { borderColor: C.err, color: C.err } }, 'apiKey 未配置'),
         ),
         h('div', { style: { height: 10 } }),
         h('div', { style: { display: 'flex', gap: 10, flexWrap: 'wrap' } },
@@ -857,6 +869,14 @@
           h('div', { style: { flex: '2 1 280px' } }, h(Field, { label: 'url（OpenAI 兼容基址）' },
             h(Input, { value: baseURL, placeholder: '例如 https://api.deepseek.com', onChange: setBaseURL }))),
         ),
+        h(Field, { label: 'apiKey（密钥；已配置可留空不改，支持 ${DEEPSEEK_API_KEY}）' },
+          h(Input, {
+            type: 'password',
+            autoComplete: 'off',
+            value: apiKey,
+            placeholder: hasApiKey ? '已配置，留空则不修改' : '例如 sk-... 或 ${DEEPSEEK_API_KEY}',
+            onChange: setApiKey,
+          })),
         h('div', { style: { display: 'flex', gap: 10, flexWrap: 'wrap' } },
           h('div', { style: { flex: '1 1 200px' } }, h(Field, { label: 'model（点「测试」可从服务端拉取）' },
             h(Input, { value: model, placeholder: '例如 deepseek-chat', onChange: setModel }))),
@@ -883,9 +903,9 @@
           h(Btn, { variant: 'primary', disabled: busy || testing, onClick: () => void save() }, busy ? '保存中…' : '保存模型配置'),
         ),
         h('div', { style: { color: C.faint, fontSize: 11.5, lineHeight: 1.7, marginTop: 8 } },
-          '「测试」会请求 url/models（密钥仍读本机配置，不经浏览器），连通后把 model 填回输入框；多模型可点下方按钮切换。' +
-          '单次默认 3000 token；长章会被截断时插件会在同一份提示词下自动续写' +
-          '（最多 3 次；卷大纲、长章节常靠它补全），续写多次仍没写完才明确提示「被截断」，绝不把半截稿当成功。'),
+          'apiKey 写入本机 .agent-config.json，state 只回「是否已配置」、不回明文。' +
+          '「测试」用表单里的 url / apiKey（可未保存）请求 /models，连通后把 model 填回；多模型可点下方按钮切换。' +
+          '单次默认 3000 token；长章截断时会自动续写（最多 3 次），续写仍没写完才提示「被截断」。'),
       )
 
       const panelPolish = h('div', { style: S.card },
