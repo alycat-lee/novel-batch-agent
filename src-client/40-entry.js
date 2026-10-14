@@ -22,15 +22,8 @@
      * 否则用户改 prompt / 正文后按 Esc 会被跳过，觉得「退不出去」。
      */
     function WriterPanel(props) {
+      // Esc 由 Workbench 自己处理：先回当前类型首页列表，已在列表再退出。
       const close = props !== null && props !== undefined && typeof props.close === 'function' ? props.close : () => {}
-      useEffect(() => {
-        const onKey = (e) => {
-          if (e.key === 'Escape') close()
-        }
-        globalThis.addEventListener('keydown', onKey)
-        return () => globalThis.removeEventListener('keydown', onKey)
-        // close 只做 selectPanel(null)，行为不随渲染变，空依赖即可
-      }, [])
       return h(Workbench, { close })
     }
 

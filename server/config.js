@@ -19,7 +19,7 @@ export const DEFAULTS = {
   model: 'deepseek-chat',
   apiKey: '${DEEPSEEK_API_KEY}',
   baseURL: 'https://api.deepseek.com',
-  maxTokens: 4500,
+  maxTokens: 3000,
   vaultPath: '',
   publishPython: '',
   publishScript: '',

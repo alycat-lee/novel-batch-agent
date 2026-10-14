@@ -11,7 +11,10 @@
       const [boot, setBoot] = useState(null)
       const [err, setErr] = useState('')
       const [busy, setBusy] = useState('')
-      const [tab, setTab] = useState('write')
+      /** 顶栏类型：小说 / 公众号 / 小红书；主列表、模版、风格都按它过滤。 */
+      const [genreFilter, setGenreFilter] = useState('novel')
+      /** 顶栏菜单：works=已生成列表 / create=创建作品 / template / style / settings */
+      const [tab, setTab] = useState('works')
       const [projectId, setProjectId] = useState('')
       const [detail, setDetail] = useState(null)
       const [draft, setDraft] = useState(null)
@@ -122,15 +125,59 @@
           const data = await loadState()
           void data
           await openProject(payload.id)
-          setTab('write')
+          setTab('works')
           flash('作品已建立：' + payload.dir)
         },
         [loadState, openProject, flash],
       )
 
+      /** 切换写作类型：关掉已打开作品，回到列表，并让创建表单跟着同步。 */
+      const switchGenre = useCallback((id) => {
+        setGenreFilter(id)
+        setDetail(null)
+        setDraft(null)
+        setProjectId('')
+        setConfirmDel('')
+        if (tab === 'create' || tab === 'template' || tab === 'style' || tab === 'works') {
+          /* 保持当前菜单，只换类型过滤 */
+        } else {
+          setTab('works')
+        }
+      }, [tab])
+
       const close = () => {
         if (props !== null && props !== undefined && typeof props.close === 'function') props.close()
       }
+
+      /** 回到当前类型首页列表（小说→小说列表，公众号/小红书同理）；在作品内返回时跟着作品类型走。 */
+      const goHome = useCallback(() => {
+        if (detail !== null) {
+          const g = String(detail.meta?.genre ?? '')
+          if (g === 'novel' || g === 'wechat' || g === 'xiaohongshu') setGenreFilter(g)
+        }
+        setDetail(null)
+        setDraft(null)
+        setProjectId('')
+        setConfirmDel('')
+        setTab('works')
+      }, [detail])
+
+      /** 顶栏「返回」/ Esc：不在首页就回列表；已在首页再退出工作台。 */
+      const onReturn = useCallback(() => {
+        if (detail !== null || tab !== 'works') {
+          goHome()
+          return
+        }
+        close()
+      }, [detail, tab, goHome])
+
+      useEffect(() => {
+        const onKey = (e) => {
+          if (e.key === 'Escape') onReturn()
+        }
+        globalThis.addEventListener('keydown', onKey)
+        return () => globalThis.removeEventListener('keydown', onKey)
+      }, [onReturn])
 
       if (boot === null) {
         return h(
@@ -179,6 +226,9 @@
         return g === undefined ? id : g.label
       }
 
+      const genreTitles = { novel: '已生成的小说', wechat: '已生成的公众号', xiaohongshu: '已生成的小红书' }
+      const inStudio = detail !== null
+
       return h(
         'div',
         { style: S.overlay },
@@ -187,17 +237,31 @@
           'div',
           { style: S.topbar },
           h('span', { style: { fontSize: 15 } }, '✍️'),
-          h('span', { style: S.title }, '写作工作台'),
-          detail === null
-            ? h(Chip, null, genreLabel(boot.config === undefined ? 'novel' : 'novel'))
-            : h(Chip, null, detail.meta.name + ' · ' + genreLabel(detail.meta.genre)),
+          h('span', {
+            style: Object.assign({}, S.title, { cursor: 'pointer' }),
+            title: '回到已生成列表',
+            onClick: goHome,
+          }, '写作工作台'),
+          inStudio
+            ? h(Chip, null, detail.meta.name + ' · ' + genreLabel(detail.meta.genre))
+            : h(
+                'div',
+                { style: Object.assign({}, S.tabs, { marginLeft: 4 }) },
+                ...boot.genres.map((g) =>
+                  h(Btn, {
+                    key: g.id,
+                    variant: genreFilter === g.id ? 'primary' : 'ghost',
+                    title: g.hint,
+                    onClick: () => switchGenre(g.id),
+                  }, g.label),
+                ),
+              ),
           h(
             'div',
             { style: S.tabs },
             ...[
-              ['write', '写作'],
+              ['create', '创建作品'],
               ['template', '模版'],
-              ['sample', '样例→模版'],
               ['style', '风格'],
               ['settings', '设置'],
             ].map(([id, label]) =>
@@ -205,8 +269,12 @@
                 Btn,
                 {
                   key: id,
-                  variant: tab === id ? 'primary' : 'ghost',
-                  onClick: () => setTab(id),
+                  variant: !inStudio && tab === id ? 'primary' : 'ghost',
+                  onClick: () => {
+                    setDetail(null)
+                    setDraft(null)
+                    setTab(id)
+                  },
                 },
                 label,
               ),
@@ -215,7 +283,13 @@
           h('div', { style: { flex: 1 } }),
           toast === '' ? null : h('span', { style: { color: C.ok, fontSize: 12 } }, toast),
           h(Btn, { variant: 'ghost', onClick: () => void loadState(), title: '重新读取配置与作品列表' }, '刷新'),
-          h(Btn, { onClick: close, title: '返回（Esc）', style: { flexShrink: 0 } }, '✕ 返回'),
+          h(Btn, {
+            onClick: onReturn,
+            title: detail !== null || tab !== 'works'
+              ? '返回当前类型的作品列表（Esc）'
+              : '退出工作台（Esc）',
+            style: { flexShrink: 0 },
+          }, '✕ 返回'),
         ),
 
         // ---- 主体 ----
@@ -224,11 +298,11 @@
           { style: S.body },
           err === '' ? null : h('div', { style: { position: 'absolute', margin: 12, zIndex: 5, maxWidth: 560 } }, h('div', { style: S.err }, err)),
 
-          tab === 'write'
+          inStudio || tab === 'works' || tab === 'create'
             ? h(WriteTab, {
                 boot,
                 setBoot,
-        refresh: loadState,
+                refresh: loadState,
                 detail,
                 busy,
                 setBusy,
@@ -242,12 +316,15 @@
                 confirmDel,
                 setConfirmDel,
                 deleteProject,
+                genreFilter,
+                mode: inStudio ? 'studio' : (tab === 'create' ? 'create' : 'list'),
+                listTitle: genreTitles[genreFilter] || '已生成的作品',
+                onBackToList: goHome,
               })
             : null,
-          tab === 'template' ? h(TemplateTab, { boot, setBoot, setErr, flash, detail }) : null,
-          tab === 'sample' ? h(SampleTab, { boot, setBoot, setErr, flash, defaultGenre: detail === null ? 'novel' : detail.meta.genre }) : null,
-          tab === 'style' ? h(StyleTab, { boot, setBoot, setErr, flash, defaultGenre: detail === null ? 'novel' : detail.meta.genre }) : null,
-          tab === 'settings' ? h(SettingsTab, { boot, setBoot, setErr, flash }) : null,
+          !inStudio && tab === 'template' ? h(TemplateTab, { boot, setBoot, setErr, flash, detail, genreFilter }) : null,
+          !inStudio && tab === 'style' ? h(StyleTab, { boot, setBoot, setErr, flash, defaultGenre: genreFilter, genreFilter }) : null,
+          !inStudio && tab === 'settings' ? h(SettingsTab, { boot, setBoot, setErr, flash }) : null,
         ),
       )
     }
@@ -416,23 +493,41 @@
     }
 
     function WriteTab(props) {
-      const { boot, setBoot, detail, busy, setBusy, setErr, flash, openProject, onCreated, setDetail, draft, setDraft, confirmDel, setConfirmDel, deleteProject, refresh } = props
+      const {
+        boot, setBoot, detail, busy, setBusy, setErr, flash, openProject, onCreated, setDetail,
+        draft, setDraft, confirmDel, setConfirmDel, deleteProject, refresh,
+        genreFilter, mode, listTitle, onBackToList,
+      } = props
+      const activeGenre = typeof genreFilter === 'string' && genreFilter !== '' ? genreFilter : 'novel'
+      const viewModeHome = mode === 'create' ? 'create' : 'list'
+      const defaultWordsOf = (gid) => {
+        const g = (boot.genres || []).find((x) => x.id === gid)
+        if (g !== undefined && Number(g.defaultWords) > 0) return Number(g.defaultWords)
+        return gid === 'novel' ? 2500 : 0
+      }
       const [form, setForm] = useState({
         name: '',
-        genre: 'novel',
+        genre: activeGenre,
         theme: '',
         audience: '',
         tone: '',
         templateId: '',
         styleId: '',
         vaultNotes: [],
-        words: 0,
+        words: defaultWordsOf(activeGenre),
         channel: 'male',
         type: '',
         totalWords: 0,
         tags: [],
         count: 3,
       })
+      // 顶栏换类型时，创建表单跟着同步（避免列表筛小说、创建却还在公众号）
+      useEffect(() => {
+        if (detail !== null) return
+        setForm((prev) => prev.genre === activeGenre
+          ? prev
+          : Object.assign({}, prev, { genre: activeGenre, templateId: '', styleId: '', words: defaultWordsOf(activeGenre) }))
+      }, [activeGenre, detail])
       const [stepId, setStepId] = useState('')
       const [extra, setExtra] = useState('')
       const [showPrompt, setShowPrompt] = useState(false)
@@ -1355,97 +1450,95 @@
         }
       }
 
-      // ---- 没有打开作品：作品列表 + 新建表单 ----
+      // ---- 没有打开作品：按顶栏类型看已生成列表，或进入「创建作品」 ----
       if (detail === null) {
+        const filteredProjects = boot.projects.filter((p) => String(p.genre || '') === activeGenre)
+        const genreHint = (boot.genres.find((g) => g.id === activeGenre) || boot.genres[0] || {}).hint || ''
+
+        const projectList = h(
+          'div',
+          { style: Object.assign({}, S.scroll, viewModeHome === 'list' ? { flex: 1 } : { width: 340, borderRight: '1px solid ' + C.line, flexShrink: 0 }) },
+          h('div', { style: { fontSize: 13, fontWeight: 600, marginBottom: 8 } }, listTitle || '已生成的作品'),
+          h('div', { style: { color: C.faint, fontSize: 11.5, marginBottom: 10, lineHeight: 1.6 } },
+            genreHint + ' · 共 ' + filteredProjects.length + ' 个'),
+          filteredProjects.length === 0
+            ? h('div', { style: S.dim }, '还没有这类作品。点顶部「创建作品」建第一个。')
+            : filteredProjects.map((p) =>
+                h(
+                  'div',
+                  {
+                    key: p.id,
+                    style: Object.assign({}, S.step, { marginBottom: 4, cursor: 'default' }),
+                  },
+                  h('div', { style: { display: 'flex', alignItems: 'center', gap: 6 } },
+                    h('div', {
+                      style: { flex: 1, minWidth: 0, cursor: 'pointer' },
+                      title: '打开「' + p.name + '」',
+                      onClick: () => void openProject(p.id),
+                    },
+                      h('div', { style: { display: 'flex', alignItems: 'center', gap: 6 } },
+                        h('span', { style: { fontWeight: 500 } }, p.name),
+                        h(Chip, null, p.genreLabel),
+                        p.styleId === undefined || p.styleId === ''
+                          ? null
+                          : h(Chip, null, '风格：' + ((p.styleName === undefined || p.styleName === '') ? p.styleId : p.styleName)),
+                        h('span', { style: { flex: 1 } }),
+                        h('span', { style: { color: C.faint, fontSize: 11 } }, p.updatedAt.slice(0, 10)),
+                      ),
+                      h('div', { style: { color: C.faint, fontSize: 11, marginTop: 2 } },
+                        '已完成 ' + (p.done === undefined ? 0 : p.done.length) + ' 步 · ' + p.updatedAt.slice(0, 16).replace('T', ' ')),
+                    ),
+                    confirmDel === p.id
+                      ? h('div', { style: { display: 'flex', gap: 4, flexShrink: 0 } },
+                          h(Btn, {
+                            variant: 'primary',
+                            style: { background: C.err, borderColor: C.err, padding: '3px 8px', fontSize: 11.5 },
+                            disabled: busy === 'delete',
+                            onClick: () => void deleteProject(p),
+                          }, busy === 'delete' ? '删除中…' : '确认删除'),
+                          h(Btn, {
+                            variant: 'ghost',
+                            style: { padding: '3px 8px', fontSize: 11.5 },
+                            onClick: () => setConfirmDel(''),
+                          }, '取消'),
+                        )
+                      : h(Btn, {
+                          variant: 'ghost',
+                          title: '删除这个作品（会连 vault 里的镜像一起清掉）',
+                          style: { flexShrink: 0, padding: '3px 8px', fontSize: 12.5 },
+                          onClick: () => setConfirmDel(p.id),
+                        }, '🗑'),
+                  ),
+                ),
+              ),
+          h('div', { style: { marginTop: 14, color: C.faint, fontSize: 11.5, lineHeight: 1.7 } },
+            '点作品名打开；🗑 删除作品目录（vault 里的镜像一并清理）。',
+            h('br'),
+            '落盘根目录：',
+            h('br'),
+            h('code', { style: { fontFamily: monoStack, wordBreak: 'break-all' } }, boot.root),
+          ),
+        )
+
+        if (viewModeHome === 'list') {
+          return h('div', { style: Object.assign({}, S.main, { flexDirection: 'row' }) }, projectList)
+        }
+
         return h(
           'div',
           { style: Object.assign({}, S.main, { flexDirection: 'row' }) },
           h(
             'div',
-            { style: Object.assign({}, S.scroll, { width: 340, borderRight: '1px solid ' + C.line }) },
-            h('div', { style: { fontSize: 13, fontWeight: 600, marginBottom: 8 } }, '已有作品'),
-            boot.projects.length === 0
-              ? h('div', { style: S.dim }, '这个目录下还没有作品。右边填个名字就能建第一个。')
-              : boot.projects.map((p) =>
-                  h(
-                    'div',
-                    {
-                      key: p.id,
-                      style: Object.assign({}, S.step, { marginBottom: 4, cursor: 'default' }),
-                    },
-                    h('div', { style: { display: 'flex', alignItems: 'center', gap: 6 } },
-                      h('div', {
-                        style: { flex: 1, minWidth: 0, cursor: 'pointer' },
-                        title: '打开「' + p.name + '」',
-                        onClick: () => void openProject(p.id),
-                      },
-                        h('div', { style: { display: 'flex', alignItems: 'center', gap: 6 } },
-                          h('span', { style: { fontWeight: 500 } }, p.name),
-                          h(Chip, null, p.genreLabel),
-                          p.styleId === undefined || p.styleId === ''
-                            ? null
-                            : h(Chip, null, '风格：' + ((p.styleName === undefined || p.styleName === '') ? p.styleId : p.styleName)),
-                          h('span', { style: { flex: 1 } }),
-                          h('span', { style: { color: C.faint, fontSize: 11 } }, p.updatedAt.slice(0, 10)),
-                        ),
-                        h('div', { style: { color: C.faint, fontSize: 11, marginTop: 2 } },
-                          '已完成 ' + (p.done === undefined ? 0 : p.done.length) + ' 步 · ' + p.updatedAt.slice(0, 16).replace('T', ' ')),
-                      ),
-                      confirmDel === p.id
-                        ? h('div', { style: { display: 'flex', gap: 4, flexShrink: 0 } },
-                            h(Btn, {
-                              variant: 'primary',
-                              style: { background: C.err, borderColor: C.err, padding: '3px 8px', fontSize: 11.5 },
-                              disabled: busy === 'delete',
-                              onClick: () => void deleteProject(p),
-                            }, busy === 'delete' ? '删除中…' : '确认删除'),
-                            h(Btn, {
-                              variant: 'ghost',
-                              style: { padding: '3px 8px', fontSize: 11.5 },
-                              onClick: () => setConfirmDel(''),
-                            }, '取消'),
-                          )
-                        : h(Btn, {
-                            variant: 'ghost',
-                            title: '删除这个作品（会连 vault 里的镜像一起清掉）',
-                            style: { flexShrink: 0, padding: '3px 8px', fontSize: 12.5 },
-                            onClick: () => setConfirmDel(p.id),
-                          }, '🗑'),
-                    ),
-                  ),
-                ),
-            h('div', { style: { marginTop: 14, color: C.faint, fontSize: 11.5, lineHeight: 1.7 } },
-              '点作品名打开；🗑 删除作品目录（vault 里的镜像一并清理）。',
-              h('br'),
-              '落盘根目录：',
-              h('br'),
-              h('code', { style: { fontFamily: monoStack, wordBreak: 'break-all' } }, boot.root),
-            ),
-          ),
-          h(
-            'div',
             { style: S.scroll },
             h('div', { style: S.card },
-              h('div', { style: { fontSize: 13, fontWeight: 600, marginBottom: 10 } }, '新建作品'),
+              h('div', { style: { fontSize: 13, fontWeight: 600, marginBottom: 10 } }, '创建作品 · ' + ((boot.genres.find((g) => g.id === form.genre) || {}).label || '')),
               form.genre !== 'novel'
                 ? h(Field, { label: '作品名（同时是书名，也是目录名）' },
                     h(Input, { value: form.name, placeholder: '例如：长夜将明', onChange: (v) => setForm(Object.assign({}, form, { name: v })) }),
                   )
                 : null,
-              h(Field, { label: '写作类型' },
-                h('div', { style: S.row },
-                  ...boot.genres.map((g) =>
-                    h(Btn, {
-                      key: g.id,
-                      variant: form.genre === g.id ? 'primary' : undefined,
-                      onClick: () => setForm(Object.assign({}, form, { genre: g.id, templateId: '' })),
-                      title: g.hint,
-                    }, g.label),
-                  ),
-                ),
-                h('div', { style: { color: C.faint, fontSize: 11.5, marginTop: 6, lineHeight: 1.6 } },
-                  genre.hint + '（共 ' + genre.steps.length + ' 步）'),
-              ),
+              h('div', { style: { color: C.faint, fontSize: 11.5, marginBottom: 10, lineHeight: 1.6 } },
+                genre.hint + '（共 ' + genre.steps.length + ' 步）。写作类型由顶部「小说 / 公众号 / 小红书」切换。'),
               form.genre === 'novel'
                 ? h('div', { style: { marginBottom: 10 } },
                     h('div', { style: { color: C.sub, fontSize: 12, fontWeight: 600, marginBottom: 8 } },
@@ -1680,7 +1773,15 @@
         h(
           'div',
           { style: S.steps },
-          h(Btn, { variant: 'ghost', onClick: () => { setDetail(null); setStepId(''); } , style: { marginBottom: 8 } }, '← 作品列表'),
+          h(Btn, {
+            variant: 'ghost',
+            onClick: () => {
+              setStepId('')
+              if (typeof onBackToList === 'function') onBackToList()
+              else setDetail(null)
+            },
+            style: { marginBottom: 8 },
+          }, '← 作品列表'),
           h('div', { style: { color: C.faint, fontSize: 11, padding: '0 9px 8px' } },
             '进度 ' + doneCount + ' / ' + detail.steps.length + ' 步'),
           ...detail.steps.map((s) =>
@@ -1832,36 +1933,24 @@
                     active.overridden ? h(Chip, null, '已改过内置默认') : h(Chip, null, '内置默认'),
                     active.fromVault === true ? h(Chip, null, '来自 Obsidian 笔记') : null,
                     h('div', { style: { flex: 1 } }),
-                    h(Btn, { variant: injectOpen ? 'primary' : 'ghost', disabled: injectBusy, onClick: () => void loadInject() }, injectBusy ? '读取中…' : '本步实际注入'),
+                    h(Btn, {
+                      variant: injectOpen ? 'primary' : 'ghost',
+                      disabled: injectBusy,
+                      title: injectOpen
+                        ? '切回占位符模版（含 {{style}} / {{vault}} 等未渲染内容）'
+                        : '查看本步实际发给模型的提示词（占位符已渲染）；会隐藏占位符模版',
+                      onClick: () => void loadInject(),
+                    }, injectBusy ? '读取中…' : (injectOpen ? '占位符模版' : '本步实际注入')),
                     h(Btn, { onClick: () => setPromptEdit({ system: active.defaultSystem, user: active.defaultUser }) }, '载入内置默认'),
-                    h(Btn, { variant: 'ghost', onClick: () => setPromptPreview(!promptPreview) }, promptPreview ? '编辑' : '预览'),
-                    h(Btn, { disabled: busy === 'prompt', onClick: () => void savePrompt(false) }, '保存'),
-                    h(Btn, { variant: 'ghost', disabled: busy === 'prompt', onClick: () => void savePrompt(true) }, '还原内置'),
+                    injectOpen
+                      ? null
+                      : h(Btn, { variant: 'ghost', onClick: () => setPromptPreview(!promptPreview) }, promptPreview ? '编辑' : '预览'),
+                    h(Btn, { disabled: busy === 'prompt' || injectOpen, onClick: () => void savePrompt(false) }, '保存'),
+                    h(Btn, { variant: 'ghost', disabled: busy === 'prompt' || injectOpen, onClick: () => void savePrompt(true) }, '还原内置'),
                   ),
-                  h('div', { style: { color: C.faint, fontSize: 11.5, marginBottom: 8, lineHeight: 1.7 } },
-                    '上面的「内置默认 / 已改过内置默认」只说明这份提示词文本有没有被改过，与「这一步做没做、润色有没有跑」无关；实际生效的来源是 vault 笔记优先。'),
-                  h('div', { style: { color: C.faint, fontSize: 11.5, marginBottom: 8, lineHeight: 1.7 } },
-                    '可用占位符：{{title}} {{genre}} {{theme}} {{audience}} {{tone}} {{words}} {{channel}} {{type}} {{totalWords}} {{tags}} {{count}} {{volume}} {{extra}} {{template}} {{style}} {{vault}} {{fanqieTags}} {{context}}。未知占位符会渲染成空串（{{fanqieTags}} 只在「作品定位」步有内容，是番茄官方标签清单）。'),
-                  h('div', { style: { color: C.faint, fontSize: 11.5, marginBottom: 8, lineHeight: 1.7 } },
-                    '这一步的提示词在 vault 里的笔记：' + (active.fromVault === true && active.vaultPath !== '' ? active.vaultPath : ('dsh-writer-m/提示词/' + detail.meta.genre + '-' + active.id + '.md')) + '。保存 / 还原会同步写 / 删这篇笔记（在 Obsidian 里改它同样生效）。'),
-                  heldPlaceholder(promptEdit, '{{style}}')
-                    ? null
-                    : h('div', { style: { color: C.warn, fontSize: 11.5, marginBottom: 8, lineHeight: 1.7 } },
-                        '这份提示词没有 {{style}} 占位符：生成时插件会把该作品挂的风格画像自动补到 system 末尾，不会被丢掉；想自己控制位置就把 {{style}} 插进去。'),
-                  heldPlaceholder(promptEdit, '{{vault}}')
-                    ? null
-                    : h('div', { style: { color: C.faint, fontSize: 11.5, marginBottom: 8, lineHeight: 1.7 } },
-                        '这份提示词没有 {{vault}} 占位符：参考笔记会在生成时自动补到 user 末尾。'),
-                  active.id === 'positioning' && !heldPlaceholder(promptEdit, '{{fanqieTags}}')
-                    ? h('div', { style: { color: C.faint, fontSize: 11.5, marginBottom: 8, lineHeight: 1.7 } },
-                        '这份提示词没有 {{fanqieTags}} 占位符：生成时插件会把番茄官方标签清单 + 上架信息格式自动补到 user 末尾，上架信息不会被丢掉（只影响它在提示词里的位置）。')
-                    : null,
-                  active.id === 'positioning' && !heldPlaceholder(promptEdit, '{{existing}}')
-                    ? h('div', { style: { color: C.faint, fontSize: 11.5, marginBottom: 8, lineHeight: 1.7 } },
-                        '这份提示词没有 {{existing}} 占位符：定位步生成时插件会把这部作品已写下的大纲 / 人物 / 卷大纲 / 章节标题作为「已有设定」自动补到 user 末尾，避免重跑时把主角和剧情换成另一套。')
-                    : null,
+                  // 两种互斥视图：实际注入 ↔ 占位符模版（点「本步实际注入」切换）
                   injectOpen
-                    ? h('div', { style: Object.assign({}, S.card, { marginBottom: 10 }) },
+                    ? h('div', null,
                         h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, flexWrap: 'wrap' } },
                           h('span', { style: { fontWeight: 600 } }, '本步实际注入'),
                           h(Chip, null, injectData === null
@@ -1879,7 +1968,7 @@
                           injectData !== null ? h(Chip, null, '前序上下文 ' + fmtChars(injectData.contextChars)) : null,
                         ),
                         h('div', { style: { color: C.faint, fontSize: 11.5, marginBottom: 8, lineHeight: 1.7 } },
-                          '这就是点「生成草稿」时真正发给模型的那份内容（这里不发模型调用）：占位符已按本作品当前的模版 / 风格画像 / 参考笔记 / 前序产物渲染完。换画像或改提示词后再看这里，内容会跟着变。'),
+                          '这就是点「生成草稿」时真正发给模型的那份内容（这里不发模型调用）：占位符已按本作品当前的模版 / 风格画像 / 参考笔记 / 前序产物渲染完。再点按钮「占位符模版」可切回带 {{style}} 的原文。'),
                         injectData === null
                           ? null
                           : h(React.Fragment, null,
@@ -1905,20 +1994,43 @@
                               h('div', { style: { color: C.sub, fontSize: 11.5, margin: '10px 0 4px' } }, 'user（最终 · 本次任务）'),
                               h('pre', { style: S.pre }, injectData.user)),
                       )
-                    : null,
-                  promptPreview
-                    ? h(React.Fragment, null,
-                        h('div', { style: { marginBottom: 10 } },
-                          h('div', { style: { color: C.sub, fontSize: 11.5, marginBottom: 4 } }, 'system（角色与约束）'),
-                          h('div', { style: { background: C.panel2, border: '1px solid ' + C.line, borderRadius: 6, padding: '10px 12px' } }, renderMarkdown(promptEdit.system))),
-                        h('div', null,
-                          h('div', { style: { color: C.sub, fontSize: 11.5, marginBottom: 4 } }, 'user（本次任务）'),
-                          h('div', { style: { background: C.panel2, border: '1px solid ' + C.line, borderRadius: 6, padding: '10px 12px' } }, renderMarkdown(promptEdit.user))))
                     : h(React.Fragment, null,
-                        h(Field, { label: 'system（角色与约束）' },
-                          h(Area, { value: promptEdit.system, minHeight: 110, onChange: (v) => setPromptEdit(Object.assign({}, promptEdit, { system: v })) })),
-                        h(Field, { label: 'user（本次任务）' },
-                          h(Area, { value: promptEdit.user, minHeight: 220, onChange: (v) => setPromptEdit(Object.assign({}, promptEdit, { user: v })) }))),
+                        h('div', { style: { color: C.faint, fontSize: 11.5, marginBottom: 8, lineHeight: 1.7 } },
+                          '上面的「内置默认 / 已改过内置默认」只说明这份提示词文本有没有被改过，与「这一步做没做、润色有没有跑」无关；实际生效的来源是 vault 笔记优先。'),
+                        h('div', { style: { color: C.faint, fontSize: 11.5, marginBottom: 8, lineHeight: 1.7 } },
+                          '可用占位符：{{title}} {{genre}} {{theme}} {{audience}} {{tone}} {{words}} {{channel}} {{type}} {{totalWords}} {{tags}} {{count}} {{volume}} {{extra}} {{template}} {{style}} {{vault}} {{fanqieTags}} {{context}}。未知占位符会渲染成空串（{{fanqieTags}} 只在「作品定位」步有内容，是番茄官方标签清单）。'),
+                        h('div', { style: { color: C.faint, fontSize: 11.5, marginBottom: 8, lineHeight: 1.7 } },
+                          '这一步的提示词在 vault 里的笔记：' + (active.fromVault === true && active.vaultPath !== '' ? active.vaultPath : ('dsh-writer-m/提示词/' + detail.meta.genre + '-' + active.id + '.md')) + '。保存 / 还原会同步写 / 删这篇笔记（在 Obsidian 里改它同样生效）。'),
+                        heldPlaceholder(promptEdit, '{{style}}')
+                          ? null
+                          : h('div', { style: { color: C.warn, fontSize: 11.5, marginBottom: 8, lineHeight: 1.7 } },
+                              '这份提示词没有 {{style}} 占位符：生成时插件会把该作品挂的风格画像自动补到 system 末尾，不会被丢掉；想自己控制位置就把 {{style}} 插进去。'),
+                        heldPlaceholder(promptEdit, '{{vault}}')
+                          ? null
+                          : h('div', { style: { color: C.faint, fontSize: 11.5, marginBottom: 8, lineHeight: 1.7 } },
+                              '这份提示词没有 {{vault}} 占位符：参考笔记会在生成时自动补到 user 末尾。'),
+                        active.id === 'positioning' && !heldPlaceholder(promptEdit, '{{fanqieTags}}')
+                          ? h('div', { style: { color: C.faint, fontSize: 11.5, marginBottom: 8, lineHeight: 1.7 } },
+                              '这份提示词没有 {{fanqieTags}} 占位符：生成时插件会把番茄官方标签清单 + 上架信息格式自动补到 user 末尾，上架信息不会被丢掉（只影响它在提示词里的位置）。')
+                          : null,
+                        active.id === 'positioning' && !heldPlaceholder(promptEdit, '{{existing}}')
+                          ? h('div', { style: { color: C.faint, fontSize: 11.5, marginBottom: 8, lineHeight: 1.7 } },
+                              '这份提示词没有 {{existing}} 占位符：定位步生成时插件会把这部作品已写下的大纲 / 人物 / 卷大纲 / 章节标题作为「已有设定」自动补到 user 末尾，避免重跑时把主角和剧情换成另一套。')
+                          : null,
+                        promptPreview
+                          ? h(React.Fragment, null,
+                              h('div', { style: { marginBottom: 10 } },
+                                h('div', { style: { color: C.sub, fontSize: 11.5, marginBottom: 4 } }, 'system（角色与约束 · 占位符模版）'),
+                                h('div', { style: { background: C.panel2, border: '1px solid ' + C.line, borderRadius: 6, padding: '10px 12px' } }, renderMarkdown(promptEdit.system))),
+                              h('div', null,
+                                h('div', { style: { color: C.sub, fontSize: 11.5, marginBottom: 4 } }, 'user（本次任务 · 占位符模版）'),
+                                h('div', { style: { background: C.panel2, border: '1px solid ' + C.line, borderRadius: 6, padding: '10px 12px' } }, renderMarkdown(promptEdit.user))))
+                          : h(React.Fragment, null,
+                              h(Field, { label: 'system（角色与约束）' },
+                                h(Area, { value: promptEdit.system, minHeight: 110, onChange: (v) => setPromptEdit(Object.assign({}, promptEdit, { system: v })) })),
+                              h(Field, { label: 'user（本次任务）' },
+                                h(Area, { value: promptEdit.user, minHeight: 220, onChange: (v) => setPromptEdit(Object.assign({}, promptEdit, { user: v })) }))),
+                      ),
                 )
               : null,
 

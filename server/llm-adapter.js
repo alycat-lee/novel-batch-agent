@@ -60,7 +60,7 @@ function mockBody(options) {
   const user = userTextOf(options)
   const system = String(options?.system ?? '')
   const blob = user + '\n' + system
-  const maxTokens = Number.isInteger(options?.maxTokens) && options.maxTokens > 0 ? options.maxTokens : 4500
+  const maxTokens = Number.isInteger(options?.maxTokens) && options.maxTokens > 0 ? options.maxTokens : 3000
   // 中文约 1 token ≈ 1.5~2 字；mock 按 maxTokens 的一半估目标字数，再被结构块覆盖
   const target = Math.min(8000, Math.max(200, Math.floor(maxTokens * 0.45)))
 
@@ -213,11 +213,78 @@ async function* mockStream(options) {
   yield { type: 'finish', reason: { kind: 'stop' } }
 }
 
-function completionsUrl(baseURL) {
+function normalizeBaseURL(baseURL) {
   const b = String(baseURL ?? '').trim().replace(/\/+$/, '')
-  if (b === '') return 'https://api.deepseek.com/chat/completions'
-  if (b.endsWith('/chat/completions')) return b
-  return b + '/chat/completions'
+  if (b === '') return 'https://api.deepseek.com'
+  if (b.endsWith('/chat/completions')) return b.slice(0, -'/chat/completions'.length) || 'https://api.deepseek.com'
+  return b
+}
+
+function completionsUrl(baseURL) {
+  return normalizeBaseURL(baseURL) + '/chat/completions'
+}
+
+function modelsUrl(baseURL) {
+  return normalizeBaseURL(baseURL) + '/models'
+}
+
+/**
+ * 探测 OpenAI 兼容 /models：连通性 + 可用模型 id 列表。
+ * overrides 可带未保存的表单值（baseURL / model），apiKey 始终读宿主配置。
+ */
+async function testConnection(cfg, overrides = {}) {
+  if (process.env.MOCK_LLM === '1' || process.env.MOCK_LLM === 'true') {
+    const wanted = String(overrides.model ?? cfg.model ?? 'mock-chat').trim() || 'mock-chat'
+    const models = ['mock-chat', 'mock-reasoner']
+    return {
+      ok: true,
+      mock: true,
+      models,
+      model: models.includes(wanted) ? wanted : models[0],
+      baseURL: normalizeBaseURL(overrides.baseURL ?? cfg.baseURL),
+    }
+  }
+  const apiKey = resolveEnvRef(cfg.apiKey).trim()
+  if (apiKey === '') {
+    throw new Error('未配置 apiKey（可在 .agent-config.json 填写或设 DEEPSEEK_API_KEY）')
+  }
+  const base = normalizeBaseURL(overrides.baseURL ?? cfg.baseURL)
+  const url = modelsUrl(base)
+  let res
+  try {
+    res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        accept: 'application/json',
+        authorization: 'Bearer ' + apiKey,
+      },
+      signal: AbortSignal.timeout(20000),
+    })
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    throw new Error('连不上模型服务（' + url + '）：' + detail)
+  }
+  if (!res.ok) {
+    let detail = ''
+    try { detail = await res.text() } catch { detail = '' }
+    throw new Error('模型列表 HTTP ' + res.status + '：' + clip(detail, 400))
+  }
+  let json
+  try {
+    json = await res.json()
+  } catch {
+    throw new Error('模型列表不是合法 JSON')
+  }
+  const rows = Array.isArray(json?.data) ? json.data : (Array.isArray(json) ? json : [])
+  const models = []
+  for (const row of rows) {
+    const id = typeof row === 'string' ? row : String(row?.id ?? '').trim()
+    if (id !== '' && !models.includes(id)) models.push(id)
+  }
+  if (models.length === 0) throw new Error('模型列表为空（请检查 url / apiKey 是否对应同一服务）')
+  const wanted = String(overrides.model ?? cfg.model ?? '').trim()
+  const model = models.includes(wanted) ? wanted : models[0]
+  return { ok: true, mock: false, models, model, baseURL: base }
 }
 
 function mapFinish(reason) {
@@ -360,6 +427,11 @@ export function createLlm(getConfig) {
         return
       }
       yield* liveStream(options, cfg)
+    },
+    /** 测试连通性并返回可用 model id（供设置页「测试」按钮返显）。 */
+    async test(overrides = {}) {
+      const cfg = typeof getConfig === 'function' ? getConfig() : getConfig
+      return testConnection(cfg ?? {}, overrides)
     },
   }
 }

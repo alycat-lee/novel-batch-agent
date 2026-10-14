@@ -46,14 +46,14 @@ server/config.js        <root>/.agent-config.json + configEditor.edit 写盘
 | `provider` / `model` | `deepseek` / `deepseek-chat` | 模型路由 |
 | `apiKey` | `${DEEPSEEK_API_KEY}` | 支持 `${ENV_VAR}` 展开 |
 | `baseURL` | `https://api.deepseek.com` | OpenAI 兼容基址 |
-| `maxTokens` | `4500` | 单次最大输出 token |
+| `maxTokens` | `3000` | 单次最大输出 token |
 | `vaultPath` | 空 | Obsidian 库（可选） |
 | `enabled` | `true` | `false` 时 API 一律 503 |
 | `batch.concurrency` | `1` | 同时写几本（1 = 串行） |
 | `batch.retry` | `3` | 单步失败重试次数 |
 | `batch.retryDelayMs` | `5000` | 重试起始间隔（指数退避） |
 
-工作台「设置」里改 `maxTokens` / `root` / `provider` / `model` 会走 `configEditor.edit` **写盘**，重启后仍在。
+工作台「设置」里改 `maxTokens` / `root` / `provider` / `model` / `baseURL` 会走 `configEditor.edit` **写盘**，重启后仍在；「测试」会请求 `{baseURL}/models` 并返显可用 model。
 
 ```powershell
 copy .env.example .env

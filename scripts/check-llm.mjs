@@ -147,7 +147,7 @@ console.log('== 拼接与提示词工具函数 ==')
   const p = buildContinueUser('结尾内容', 2)
   ok('续写提示词标注轮次', p.startsWith('第 2 次续写'))
   ok('续写提示词只回贴尾部 tailChars', buildContinueUser('A'.repeat(5000), 1).includes('A'.repeat(CONTINUE_DEFAULTS.tailChars)))
-  ok('默认上限没被改动', LLM_DEFAULTS.maxTokens === 4500 && LLM_DEFAULTS.timeoutMs === 180000)
+  ok('默认上限没被改动', LLM_DEFAULTS.maxTokens === 3000 && LLM_DEFAULTS.timeoutMs === 180000)
 }
 
 console.log('== 目标篇幅驱动续写（用户 m02113：本地模型一次写不长） ==')
