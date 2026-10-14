@@ -1069,6 +1069,13 @@
       const [relStack, setRelStack] = useState([])
       const [entries, setEntries] = useState([])
       const [preview, setPreview] = useState(null)
+      /** 第一部分·原文入库表单：showImport 展开，importing 防重复提交 */
+      const [showImport, setShowImport] = useState(false)
+      const [importForm, setImportForm] = useState({ name: '', channel: '', type: '', path: '', text: '' })
+      const [importing, setImporting] = useState(false)
+      /** 第一部分·拆书：tearing 防重复触发，teardownResult 展示三件套落点 */
+      const [tearing, setTearing] = useState(false)
+      const [teardownResult, setTeardownResult] = useState(null)
 
       const loadOverview = async () => {
         setLoading(true)
@@ -1141,6 +1148,57 @@
         }
       }
 
+      /** 导入原文到「爆款原文」树：路径优先，其次粘贴文本；成功后刷新树。 */
+      const doImport = async () => {
+        if (importForm.name.trim() === '') {
+          setErr('先填书名')
+          return
+        }
+        if (importForm.path.trim() === '' && importForm.text.trim() === '') {
+          setErr('填一个原文文件路径，或粘贴原文')
+          return
+        }
+        setImporting(true)
+        try {
+          const data = await api('source-import', {
+            name: importForm.name.trim(),
+            channel: importForm.channel.trim(),
+            type: importForm.type.trim(),
+            path: importForm.path.trim(),
+            text: importForm.text,
+          })
+          flash('已入库《' + data.name + '》（' + data.chars + ' 字）→ ' + data.rel)
+          setImportForm({ name: '', channel: '', type: '', path: '', text: '' })
+          setShowImport(false)
+          await loadOverview()
+          await loadLevel(tree, relStack)
+        } catch (e) {
+          setErr(e instanceof Error ? e.message : String(e))
+        } finally {
+          setImporting(false)
+        }
+      }
+
+      /** 对预览中的原文跑拆书：统计指纹 + 蒸馏风格/模版 + 卡片，三件套落进资产树。
+       *  quick=true 是连载书追更用的快刷：只刷指纹与卡片，零 token，风格/模版沿用上次。 */
+      const doTeardown = async (quick) => {
+        if (preview === null) return
+        setTearing(true)
+        setTeardownResult(null)
+        try {
+          const data = await api('teardown', { rel: relStack.concat([preview.name]).join('/'), quick: quick === true })
+          setTeardownResult(data)
+          flash(quick === true
+            ? '快刷完成：《' + data.name + '》指纹已更新（' + data.stats.chapterCount + ' 章）'
+            : '拆书完成：《' + data.name + '》→ 风格 ' + data.styleId + ' / 模版 ' + data.templateId)
+          await loadOverview()
+        } catch (e) {
+          setErr(e instanceof Error ? e.message : String(e))
+        } finally {
+          setTearing(false)
+        }
+      }
+
       const metaChips = (meta) => {
         const chips = []
         if (meta === null || meta === undefined) return chips
@@ -1164,9 +1222,36 @@
               }, t.label + '（' + t.files + '）'),
             ),
             h('div', { style: { flex: 1 } }),
+            tree === 'source' ? h(Btn, {
+              variant: showImport ? 'ghost' : 'primary',
+              onClick: () => setShowImport(!showImport),
+            }, showImport ? '收起导入' : '导入原文') : null,
             missing.length === 0 ? null : h(Btn, { variant: 'primary', onClick: () => void initDirs() },
               '初始化书库目录（缺 ' + missing.length + ' 个）'),
             h(Btn, { variant: 'ghost', onClick: () => { void loadOverview().then(() => loadLevel(tree, relStack)) } }, '刷新'),
+          ),
+          showImport === false || tree !== 'source' ? null : h('div', { style: Object.assign({}, S.card, { marginTop: 10 }) },
+            h('div', { style: { fontSize: 13, fontWeight: 600, marginBottom: 8 } }, '导入爆款原文（第一部分·原文入库）'),
+            h('div', { style: { color: C.faint, fontSize: 11.5, marginBottom: 10 } },
+              '原文写入「爆款原文」树并带元信息头；入库后打开文件点「拆这本书」即可产出风格画像 + 结构模版 + 拆书卡片。'),
+            h(Field, { label: '书名' },
+              h(Input, { value: importForm.name, placeholder: '例：我在精神病院学斩神', onChange: (v) => setImportForm(Object.assign({}, importForm, { name: v })) })),
+            h('div', { style: { display: 'flex', gap: 10 } },
+              h('div', { style: { flex: 1 } },
+                h(Field, { label: '频道（可空）' },
+                  h(Input, { value: importForm.channel, placeholder: '男频 / 女频', onChange: (v) => setImportForm(Object.assign({}, importForm, { channel: v })) }))),
+              h('div', { style: { flex: 1 } },
+                h(Field, { label: '类型（可空）' },
+                  h(Input, { value: importForm.type, placeholder: '都市高武 / 悬疑脑洞…', onChange: (v) => setImportForm(Object.assign({}, importForm, { type: v })) }))),
+            ),
+            h(Field, { label: '原文文件路径（整本 txt/md，优先于粘贴）' },
+              h(Input, { value: importForm.path, placeholder: '例：D:\\novels\\斩神.txt 或 /home/me/book.txt', onChange: (v) => setImportForm(Object.assign({}, importForm, { path: v })) })),
+            importForm.path.trim() !== '' ? null : h(Field, { label: '或粘贴原文' },
+              h(Area, { value: importForm.text, placeholder: '把原文粘贴到这里…', minHeight: 110, onChange: (v) => setImportForm(Object.assign({}, importForm, { text: v })) })),
+            h('div', { style: S.row },
+              h(Btn, { variant: 'primary', disabled: importing, onClick: () => void doImport() }, importing ? '入库中…' : '确认入库'),
+              h(Btn, { variant: 'ghost', disabled: importing, onClick: () => setShowImport(false) }, '取消'),
+            ),
           ),
           h('div', { style: Object.assign({}, S.card, { marginTop: 10 }) },
             h('div', { style: { color: C.faint, fontSize: 11.5, marginBottom: 8 } },
@@ -1196,9 +1281,37 @@
           preview === null ? null : h('div', { style: Object.assign({}, S.card, { marginTop: 10 }) },
             h('div', { style: S.row },
               h('div', { style: { fontSize: 12.5, fontWeight: 600, flex: 1 } }, preview.name),
-              h(Btn, { variant: 'ghost', onClick: () => setPreview(null) }, '关闭预览'),
+              tree === 'source' && /\.md$/i.test(preview.name)
+                ? h(Btn, { variant: 'primary', disabled: tearing, onClick: () => void doTeardown(false) },
+                    tearing ? '拆书中（采样+蒸馏，需要几分钟）…' : '拆这本书')
+                : null,
+              tree === 'source' && /\.md$/i.test(preview.name)
+                ? h(Btn, { variant: 'ghost', disabled: tearing, title: '连载书追更用：只刷指纹与卡片，零 token，风格/模版沿用上次', onClick: () => void doTeardown(true) },
+                    '快刷指纹')
+                : null,
+              h(Btn, { variant: 'ghost', onClick: () => { setPreview(null); setTeardownResult(null) } }, '关闭预览'),
             ),
             h('pre', { style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 12, lineHeight: 1.8, color: C.sub, maxHeight: 420, overflow: 'auto', margin: 0 } }, preview.text),
+          ),
+          teardownResult === null ? null : h('div', { style: Object.assign({}, S.card, { marginTop: 10 }) },
+            h('div', { style: { fontSize: 13, fontWeight: 600, marginBottom: 8 } },
+              (teardownResult.quick === true ? '指纹已快刷：《' : '拆书三件套已产出：《') + teardownResult.name + '》' +
+              (typeof teardownResult.lastChapter === 'string' && teardownResult.lastChapter !== '' ? '（截至 ' + teardownResult.lastChapter + '）' : '')),
+            h('div', { style: { fontSize: 12, lineHeight: 2, color: C.sub } },
+              h('div', null, '风格画像：' + teardownResult.styleId + '（风格页可选，注入章节步与润色步）'),
+              h('div', null, '结构模版：' + teardownResult.templateId + '（模版页可选，注入大纲步）'),
+              h('div', null, '拆书卡片：' + teardownResult.cardRel),
+              h('div', null,
+                '指纹：' + teardownResult.stats.chapterCount + ' 章 / 单章均 ' + teardownResult.stats.avgChapterChars + ' 字' +
+                ' / 对话段占比约 ' + teardownResult.stats.avgDialogueRatio + '%' +
+                (teardownResult.stats.hookDist.length > 0
+                  ? ' / 钩子主类型 ' + teardownResult.stats.hookDist[0].hook + '（' + teardownResult.stats.hookDist[0].pct + '%）'
+                  : '')),
+              teardownResult.cardUpdated === true
+                ? h('div', { style: { color: C.warn } }, '卡片已存在：本次只更新指纹与三件套引用，人填的标签/实战记录/评级已保留。')
+                : null,
+              ...(teardownResult.warnings || []).map((w, i) => h('div', { key: i, style: { color: C.warn } }, w)),
+            ),
           ),
         ),
       )
