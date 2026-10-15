@@ -12,6 +12,20 @@ import { existsSync } from 'node:fs'
 const NS = 'dsh-writer-m'
 const CONFIG_FILE = '.agent-config.json'
 
+/** 多模型分工的步骤名单（lib 与设置页共用这份名单，避免两边各写一份漂移）。 */
+export const LANE_KEYS = [
+  'positioning', 'outline', 'characters', 'volume-outline', 'chapter-outline',
+  'title', 'tags', 'chapter', 'polish', 'analysis',
+]
+
+/** 旧四档分工 → 步级分工的迁移映射（老配置读进来自动摊开，不丢用户的指派）。 */
+const LANE_LEGACY_MAP = {
+  planning: ['positioning', 'outline', 'characters', 'volume-outline', 'chapter-outline', 'title', 'tags'],
+  drafting: ['chapter'],
+  polishing: ['polish'],
+  analysis: ['analysis'],
+}
+
 export const DEFAULTS = {
   root: join(homedir(), 'Documents', 'novel-batch-agent'),
   enabled: true,
@@ -37,17 +51,13 @@ export const DEFAULTS = {
   /** 多模型列表：[{ id, label, provider, baseURL, model, apiKey, maxTokens }]。空的 = 只用上面的单模型。 */
   models: [],
   /**
-   * 分工指定：四个工种各自指向 models[].id，空串 = 用默认模型（上面的单模型配置）。
-   *   planning  规划步（定位/大纲/人物/卷纲/章纲/书名/标签）
-   *   drafting  章节正文（含快速通道）
-   *   polishing 润色与去AI
-   *   analysis  分析与拆书（风格蒸馏/结构拆解/笔记学习）
+   * 分工指定：每个生成步骤各自指向 models[].id，空串 = 用默认模型（上面的单模型配置）。
+   *   positioning 定位 / outline 大纲 / characters 人物 / volume-outline 卷纲 / chapter-outline 章纲
+   *   title 书名 / tags 标签 / chapter 章节正文（含快速通道）/ polish 润色（含去AI）
+   *   analysis 分析与拆书（风格蒸馏/结构拆解/笔记学习）
    */
-  lanes: { planning: '', drafting: '', polishing: '', analysis: '' },
+  lanes: Object.fromEntries(LANE_KEYS.map((k) => [k, ''])),
 }
-
-/** 多模型分工的四个工种（lib 与设置页共用这份名单，避免两边各写一份漂移）。 */
-export const LANE_KEYS = ['planning', 'drafting', 'polishing', 'analysis']
 
 /** 解析 apiKey 里的 ${ENV_VAR} 引用；解析不到时回空串，由调用方报人话。 */
 export function resolveEnvRef(value) {
@@ -108,11 +118,19 @@ function normalizeModels(models) {
   return out
 }
 
-/** 分工表 normalize：只认四个工种，值是 models[].id 或空串（= 默认模型）。 */
+/** 分工表 normalize：步级键，值是 models[].id 或空串（= 默认模型）；旧四档键自动迁移摊开。 */
 function normalizeLanes(lanes) {
   const src = lanes !== null && typeof lanes === 'object' ? lanes : {}
   const out = {}
   for (const key of LANE_KEYS) out[key] = String(src[key] ?? '').trim()
+  // 旧配置里的 planning/drafting/polishing/analysis 摊到对应步骤；步级键已显式设置（含置空）时不动
+  for (const [legacy, steps] of Object.entries(LANE_LEGACY_MAP)) {
+    const v = String(src[legacy] ?? '').trim()
+    if (v === '') continue
+    for (const step of steps) {
+      if (String(src[step] ?? '').trim() === '') out[step] = v
+    }
+  }
   return out
 }
 
