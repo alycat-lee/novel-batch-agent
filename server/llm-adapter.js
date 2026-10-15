@@ -324,7 +324,7 @@ function profileOf(cfg, options) {
 async function* liveStream(options, cfg) {
   const signal = options?.signal
   if (signal?.aborted) {
-    yield { type: 'finish', reason: { kind: 'aborted' } }
+    yield { type: 'finish', reason: { kind: 'aborted', failure: { message: '请求在开始前已被中断（超时或用户取消）' } } }
     return
   }
   const profile = profileOf(cfg, options)
@@ -375,7 +375,7 @@ async function* liveStream(options, cfg) {
     yield {
       type: 'finish',
       reason: aborted
-        ? { kind: 'aborted' }
+        ? { kind: 'aborted', failure: { message: '请求超时或连接被中断（本地慢模型 / 提示词过长时常见）' } }
         : { kind: 'error', failure: { message: error instanceof Error ? error.message : String(error) } },
     }
     return
@@ -400,7 +400,7 @@ async function* liveStream(options, cfg) {
   try {
     while (true) {
       if (signal?.aborted) {
-        yield { type: 'finish', reason: { kind: 'aborted' } }
+        yield { type: 'finish', reason: { kind: 'aborted', failure: { message: '读流过程中超时或被中断' } } }
         return
       }
       const { done, value } = await reader.read()
@@ -434,7 +434,7 @@ async function* liveStream(options, cfg) {
     yield {
       type: 'finish',
       reason: aborted
-        ? { kind: 'aborted' }
+        ? { kind: 'aborted', failure: { message: '读流过程中超时或被中断' } }
         : { kind: 'error', failure: { message: error instanceof Error ? error.message : String(error) } },
     }
     return
