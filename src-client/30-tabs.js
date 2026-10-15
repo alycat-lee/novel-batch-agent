@@ -699,6 +699,23 @@
       const [fqBusy, setFqBusy] = useState('')
       /** 设置左侧菜单：storage / model / polish / fanqie */
       const [section, setSection] = useState('storage')
+      /**
+       * 多模型与分工：models 是可编辑列表（apiKey 不回明文，留空 = 沿用），
+       * lanes 是四个工种 → 模型 id 的指派（'' = 默认模型）。
+       */
+      const [models, setModels] = useState(Array.isArray(boot.config.models) ? boot.config.models : [])
+      const [lanes, setLanes] = useState(Object.assign({ planning: '', drafting: '', polishing: '', analysis: '' }, boot.config.lanes || {}))
+      const [mmBusy, setMmBusy] = useState(false)
+      const [mmTesting, setMmTesting] = useState('')
+      // 任何一次保存成功后 boot 会刷新：多模型/分工跟着服务端走（含派生 id 回填），不与磁盘漂移
+      const modelsJson = JSON.stringify(boot.config.models ?? [])
+      const lanesJson = JSON.stringify(boot.config.lanes ?? {})
+      useEffect(() => {
+        setModels(Array.isArray(boot.config.models) ? boot.config.models : [])
+      }, [modelsJson])
+      useEffect(() => {
+        setLanes(Object.assign({ planning: '', drafting: '', polishing: '', analysis: '' }, boot.config.lanes || {}))
+      }, [lanesJson])
 
       const save = async () => {
         setBusy(true)
@@ -752,6 +769,79 @@
           setErr(msg)
         } finally {
           setTesting(false)
+        }
+      }
+
+      /** 多模型：更新某一行的某个字段（apiKey 输入框为空串 = 保存时沿用旧密钥）。 */
+      const setModelRow = (i, key, value) => {
+        setModels(models.map((m, at) => at === i ? Object.assign({}, m, { [key]: value }) : m))
+      }
+      const addModelRow = () => {
+        setModels(models.concat([{
+          id: '', label: '', provider: provider.trim() || 'deepseek',
+          baseURL: 'https://api.deepseek.com', model: '', apiKey: '', maxTokens: 3000,
+          hasApiKey: false,
+        }]))
+      }
+      const removeModelRow = (i) => {
+        const removed = models[i]
+        setModels(models.filter((_, at) => at !== i))
+        // 被指派的模型被删了，对应分工自动回默认，避免保存时被服务端拒
+        if (removed !== undefined && String(removed.id || '') !== '') {
+          const next = Object.assign({}, lanes)
+          for (const k of Object.keys(next)) if (next[k] === removed.id) next[k] = ''
+          setLanes(next)
+        }
+      }
+
+      const saveMultiModel = async () => {
+        setMmBusy(true)
+        try {
+          const patch = {
+            models: models.map((m) => {
+              const row = {
+                id: String(m.id || '').trim(),
+                label: String(m.label || '').trim(),
+                provider: String(m.provider || '').trim(),
+                baseURL: String(m.baseURL || '').trim(),
+                model: String(m.model || '').trim(),
+                maxTokens: Number(m.maxTokens) || 3000,
+              }
+              const key = String(m.apiKey || '').trim()
+              if (key !== '') row.apiKey = key
+              return row
+            }),
+            lanes,
+          }
+          const data = await api('config', { patch })
+          flash(data.warning !== '' ? data.warning : '多模型与分工已写入')
+          setBoot(await api('state'))
+        } catch (e) {
+          setErr(e instanceof Error ? e.message : String(e))
+        } finally {
+          setMmBusy(false)
+        }
+      }
+
+      /** 逐行测试：已保存的行按 profileId 测（密钥不出服务端）；未保存的新行用表单值测。 */
+      const testModelRow = async (i) => {
+        const row = models[i]
+        setMmTesting(String(i))
+        try {
+          const saved = row.hasApiKey === true && String(row.apiKey || '').trim() === '' && String(row.id || '').trim() !== ''
+          const data = await api('llm-test', saved
+            ? { profileId: row.id }
+            : {
+                baseURL: String(row.baseURL || '').trim(),
+                provider: String(row.provider || '').trim(),
+                model: String(row.model || '').trim(),
+                apiKey: String(row.apiKey || '').trim(),
+              })
+          flash((data.mock === true ? 'MOCK 模式 · ' : '') + '「' + (row.label || row.model || row.id) + '」连通正常，拉到 ' + (data.models || []).length + ' 个模型')
+        } catch (e) {
+          setErr(e instanceof Error ? e.message : String(e))
+        } finally {
+          setMmTesting('')
         }
       }
 
@@ -857,7 +947,7 @@
       )
 
       const panelModel = h('div', { style: S.card },
-        h('div', { style: { fontSize: 13, fontWeight: 600, marginBottom: 10 } }, '模型路由'),
+        h('div', { style: { fontSize: 13, fontWeight: 600, marginBottom: 10 } }, '默认模型（未分工时的兜底）'),
         h('div', { style: S.row },
           h('span', { style: { color: C.sub } }, '当前生效：'),
           boot.llm.route === null
@@ -912,6 +1002,82 @@
           'apiKey 写入本机 .agent-config.json，state 只回「是否已配置」、不回明文。' +
           '「测试」用表单里的 url / apiKey（可未保存）请求 /models，连通后把 model 填回；多模型可点下方按钮切换。' +
           '单次默认 3000 token；长章截断时会自动续写（最多 3 次），续写仍没写完才提示「被截断」。'),
+      )
+
+      const LANE_LABELS = [
+        ['planning', '规划步（定位/大纲/人物/卷纲/章纲/书名/标签）'],
+        ['drafting', '章节正文（含快速通道）'],
+        ['polishing', '润色与去AI'],
+        ['analysis', '分析与拆书（风格蒸馏/结构拆解）'],
+      ]
+
+      const panelMultiModel = h('div', { style: S.card },
+        h('div', { style: { fontSize: 13, fontWeight: 600, marginBottom: 6 } }, '多模型与分工'),
+        h('div', { style: { color: C.faint, fontSize: 11.5, lineHeight: 1.7, marginBottom: 10 } },
+          '在这里登记多个模型端点（比如本地 8B + 远程 DeepSeek），再把不同工种指派给不同模型——' +
+          '粗活给本地、精活给远程，token 花在刀刃上。没有分工的工种走下面的默认模型。密钥不回明文，留空 = 沿用已保存的。'),
+        models.length === 0
+          ? h('div', { style: { color: C.faint, fontSize: 12, marginBottom: 8 } }, '（还没有登记多模型，全部走默认模型）')
+          : models.map((m, i) =>
+              h('div', { key: i, style: { borderTop: '1px solid ' + C.line, paddingTop: 8, marginBottom: 10 } },
+                h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
+                  h('div', { style: { flex: '1 1 130px' } }, h(Field, { label: '备注' },
+                    h(Input, { value: m.label || '', placeholder: '本地 8B / DeepSeek', onChange: (v) => setModelRow(i, 'label', v) }))),
+                  h('div', { style: { flex: '1 1 130px' } }, h(Field, { label: 'id（分工用，可留空自动派生）' },
+                    h(Input, { value: m.id || '', placeholder: 'local-8b', onChange: (v) => setModelRow(i, 'id', v) }))),
+                  h('div', { style: { flex: '1 1 110px' } }, h(Field, { label: 'provider' },
+                    h(Input, { value: m.provider || '', placeholder: 'deepseek', onChange: (v) => setModelRow(i, 'provider', v) }))),
+                ),
+                h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
+                  h('div', { style: { flex: '2 1 240px' } }, h(Field, { label: 'url（OpenAI 兼容基址）' },
+                    h(Input, { value: m.baseURL || '', placeholder: 'http://127.0.0.1:11434/v1', onChange: (v) => setModelRow(i, 'baseURL', v) }))),
+                  h('div', { style: { flex: '1 1 160px' } }, h(Field, { label: 'model' },
+                    h(Input, { value: m.model || '', placeholder: 'qwen2.5:8b', onChange: (v) => setModelRow(i, 'model', v) }))),
+                  h('div', { style: { flex: '0 1 110px' } }, h(Field, { label: '最大输出' },
+                    h(Input, { value: String(m.maxTokens || 3000), onChange: (v) => setModelRow(i, 'maxTokens', v.replace(/[^0-9]/g, '')) }))),
+                ),
+                h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' } },
+                  h('div', { style: { flex: '2 1 240px' } }, h(Field, { label: 'apiKey' },
+                    h(Input, {
+                      type: 'password',
+                      autoComplete: 'off',
+                      value: m.apiKey || '',
+                      placeholder: m.hasApiKey === true ? '已配置，留空则不修改' : '例如 sk-... 或 ${ENV_VAR}（本地可乱填）',
+                      onChange: (v) => setModelRow(i, 'apiKey', v),
+                    }))),
+                  h(Btn, { disabled: mmTesting !== '' || mmBusy, onClick: () => void testModelRow(i) },
+                    mmTesting === String(i) ? '测试中…' : '测试'),
+                  h(Btn, { variant: 'ghost', disabled: mmBusy, onClick: () => removeModelRow(i) }, '删除'),
+                ),
+              ),
+            ),
+        h('div', { style: { marginBottom: 12 } },
+          h(Btn, { variant: 'ghost', disabled: mmBusy, onClick: addModelRow }, '+ 添加模型'),
+        ),
+        h('div', { style: { fontSize: 12.5, fontWeight: 600, marginBottom: 6 } }, '分工指定'),
+        ...LANE_LABELS.map(([key, label]) =>
+          h('div', { key, style: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 } },
+            h('div', { style: { flex: 1, fontSize: 12, color: C.sub } }, label),
+            h('select', {
+              style: Object.assign({}, S.input, { flex: '0 1 240px' }),
+              value: lanes[key] || '',
+              onChange: (e) => setLanes(Object.assign({}, lanes, { [key]: e.target.value })),
+            },
+              h('option', { value: '' }, '默认模型'),
+              ...models.map((m, i) =>
+                h('option', { key: i, value: String(m.id || m.model || '') },
+                  (m.label || m.id || m.model || '（未命名）') + (m.model ? '（' + m.model + '）' : '')),
+              ),
+            ),
+          ),
+        ),
+        h('div', { style: S.row },
+          h(Btn, { variant: 'primary', disabled: mmBusy || mmTesting !== '', onClick: () => void saveMultiModel() },
+            mmBusy ? '保存中…' : '保存多模型与分工'),
+        ),
+        h('div', { style: { color: C.faint, fontSize: 11.5, lineHeight: 1.7, marginTop: 6 } },
+          '分工只在「模型列表 + 分工」一起保存后生效；某个模型被删除时，指向它的分工自动回落默认模型。' +
+          '本地模型（如 Ollama / LM Studio 的 OpenAI 兼容端点）apiKey 随便填个非空串即可。'),
       )
 
       const panelPolish = h('div', { style: S.card },
@@ -1021,7 +1187,7 @@
 
       const panels = {
         storage: panelStorage,
-        model: panelModel,
+        model: h('div', null, panelMultiModel, h('div', { style: { height: 12 } }), panelModel),
         vault: panelVault,
         polish: panelPolish,
         fanqie: panelFanqie,

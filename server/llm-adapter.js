@@ -230,9 +230,19 @@ function modelsUrl(baseURL) {
 
 /**
  * 探测 OpenAI 兼容 /models：连通性 + 可用模型 id 列表。
- * overrides 可带未保存的表单值（baseURL / model / apiKey）。
+ * overrides 可带未保存的表单值（baseURL / model / apiKey）；
+ * 或带 profileId：按多模型条目取 baseURL/apiKey（设置页「逐行测试」用，密钥不出这一层）。
  */
 async function testConnection(cfg, overrides = {}) {
+  const profile = profileOf(cfg, overrides)
+  if (profile !== null) {
+    overrides = {
+      ...overrides,
+      baseURL: String(overrides.baseURL ?? '').trim() !== '' ? overrides.baseURL : profile.baseURL,
+      model: String(overrides.model ?? '').trim() !== '' ? overrides.model : profile.model,
+      apiKey: String(overrides.apiKey ?? '').trim() !== '' ? overrides.apiKey : profile.apiKey,
+    }
+  }
   if (process.env.MOCK_LLM === '1' || process.env.MOCK_LLM === 'true') {
     const wanted = String(overrides.model ?? cfg.model ?? 'mock-chat').trim() || 'mock-chat'
     const models = ['mock-chat', 'mock-reasoner']
@@ -304,26 +314,44 @@ function extractDelta(json) {
   return { text, finish: typeof fr === 'string' && fr !== '' && fr !== 'null' ? fr : null }
 }
 
+/** 按 profileId 从全量配置里取多模型条目（密钥只在这一层出现，lib 层只见 id）。 */
+function profileOf(cfg, options) {
+  const id = String(options?.profileId ?? '').trim()
+  if (id === '' || Array.isArray(cfg?.models) === false) return null
+  return cfg.models.find((m) => m !== null && typeof m === 'object' && m.id === id) ?? null
+}
+
 async function* liveStream(options, cfg) {
   const signal = options?.signal
   if (signal?.aborted) {
     yield { type: 'finish', reason: { kind: 'aborted' } }
     return
   }
-  const apiKey = resolveEnvRef(cfg.apiKey).trim()
+  const profile = profileOf(cfg, options)
+  const keyRaw = profile !== null && String(profile.apiKey ?? '').trim() !== '' ? profile.apiKey : cfg.apiKey
+  const apiKey = resolveEnvRef(keyRaw).trim()
   if (apiKey === '') {
     yield {
       type: 'finish',
-      reason: { kind: 'error', failure: { message: '未配置 apiKey（可在 .agent-config.json 填写或设 DEEPSEEK_API_KEY）' } },
+      reason: {
+        kind: 'error',
+        failure: {
+          message: profile !== null
+            ? '模型「' + (profile.label || profile.id) + '」未配置 apiKey（请在设置 → 模型路由里给该模型填密钥）'
+            : '未配置 apiKey（可在 .agent-config.json 填写或设 DEEPSEEK_API_KEY）',
+        },
+      },
     }
     return
   }
-  const url = completionsUrl(cfg.baseURL)
+  const url = completionsUrl(profile !== null && String(profile.baseURL ?? '').trim() !== '' ? profile.baseURL : cfg.baseURL)
   const user = userTextOf(options)
   const body = {
-    model: String(options?.model || cfg.model || 'deepseek-chat'),
+    model: String(options?.model || profile?.model || cfg.model || 'deepseek-chat'),
     stream: true,
-    max_tokens: Number.isInteger(options?.maxTokens) && options.maxTokens > 0 ? options.maxTokens : cfg.maxTokens,
+    max_tokens: Number.isInteger(options?.maxTokens) && options.maxTokens > 0
+      ? options.maxTokens
+      : (Number.isInteger(profile?.maxTokens) && profile.maxTokens > 0 ? profile.maxTokens : cfg.maxTokens),
     messages: [
       ...(typeof options?.system === 'string' && options.system !== ''
         ? [{ role: 'system', content: options.system }]
